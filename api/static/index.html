@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VeriFact — transparent claim verification</title>
+<style>
+  :root { --bg: #0f1115; --card: #171a21; --border: #2a2e38; --text: #e6e8ec;
+          --muted: #8b909c; --support: #2fbf71; --refute: #e5484d; --neutral: #8b909c; --disputed: #f2a93b; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", sans-serif;
+         max-width: 760px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 22px; font-weight: 500; margin-bottom: 4px; }
+  p.sub { color: var(--muted); font-size: 14px; margin-top: 0; margin-bottom: 28px; }
+  .input-row { display: flex; gap: 8px; }
+  input { flex: 1; background: var(--card); border: 1px solid var(--border); color: var(--text);
+          padding: 12px 14px; border-radius: 8px; font-size: 15px; }
+  input:focus { outline: none; border-color: #4d7cfe; }
+  button { background: #4d7cfe; color: white; border: none; padding: 12px 20px; border-radius: 8px;
+           font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 20px; margin-top: 24px; }
+  .verdict-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .verdict-badge { padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+  .badge-SUPPORTED { background: rgba(47,191,113,0.15); color: var(--support); }
+  .badge-REFUTED { background: rgba(229,72,77,0.15); color: var(--refute); }
+  .badge-DISPUTED { background: rgba(242,169,59,0.15); color: var(--disputed); }
+  .badge-NOT_ENOUGH_INFO { background: rgba(139,144,156,0.15); color: var(--neutral); }
+  .meta { color: var(--muted); font-size: 13px; }
+  .bar-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
+               display: flex; margin: 14px 0 4px; }
+  .bar-support { background: var(--support); }
+  .bar-refute { background: var(--refute); }
+  .bar-neutral { background: var(--neutral); }
+  .evidence-item { border-top: 1px solid var(--border); padding: 12px 0; font-size: 14px; }
+  .evidence-stance { font-size: 12px; font-weight: 500; margin-bottom: 4px; }
+  .stance-entailment { color: var(--support); }
+  .stance-contradiction { color: var(--refute); }
+  .stance-neutral { color: var(--neutral); }
+  .loading { color: var(--muted); font-size: 14px; margin-top: 20px; }
+  .error { color: var(--refute); font-size: 14px; margin-top: 20px; }
+</style>
+</head>
+<body>
+  <h1>VeriFact</h1>
+  <p class="sub">Type a claim. Evidence is retrieved and classified — you see where sources agree and where they don't.</p>
+
+  <div class="input-row">
+    <input id="claimInput" type="text" placeholder="e.g. Coffee reduces the risk of Parkinson's disease" />
+    <button id="submitBtn">Verify</button>
+  </div>
+
+  <div id="output"></div>
+
+<script>
+const API_URL = "/verify";
+
+document.getElementById("submitBtn").addEventListener("click", submitClaim);
+document.getElementById("claimInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitClaim();
+});
+
+async function submitClaim() {
+  const claim = document.getElementById("claimInput").value.trim();
+  const output = document.getElementById("output");
+  const btn = document.getElementById("submitBtn");
+  if (!claim) return;
+
+  btn.disabled = true;
+  output.innerHTML = '<p class="loading">Retrieving evidence and classifying stance…</p>';
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim, top_k: 8 }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Request failed (${res.status})`);
+    }
+    const data = await res.json();
+    render(data);
+  } catch (e) {
+    output.innerHTML = `<p class="error">${e.message}</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function render(data) {
+  const total = data.support_mass + data.refute_mass + data.neutral_mass;
+  const supportPct = total > 0 ? (data.support_mass / total) * 100 : 0;
+  const refutePct = total > 0 ? (data.refute_mass / total) * 100 : 0;
+  const neutralPct = total > 0 ? (data.neutral_mass / total) * 100 : 0;
+  const badgeClass = "badge-" + data.verdict.replace(/ /g, "_");
+
+  const evidenceHtml = data.evidence.map(e => {
+    const stanceLabel = { entailment: "Supports", contradiction: "Refutes", neutral: "Neutral" }[e.stance] || e.stance;
+    return `
+      <div class="evidence-item">
+        <div class="evidence-stance stance-${e.stance}">${stanceLabel} · ${(e.confidence * 100).toFixed(0)}% confidence</div>
+        <div>${escapeHtml(e.text)}</div>
+      </div>`;
+  }).join("");
+
+  document.getElementById("output").innerHTML = `
+    <div class="card">
+      <div class="verdict-row">
+        <span class="verdict-badge ${badgeClass}">${data.verdict}</span>
+        <span class="meta">confidence ${(data.confidence * 100).toFixed(0)}% · disagreement ${(data.disagreement_index * 100).toFixed(0)}%</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-support" style="width:${supportPct}%"></div>
+        <div class="bar-refute" style="width:${refutePct}%"></div>
+        <div class="bar-neutral" style="width:${neutralPct}%"></div>
+      </div>
+      <div class="meta">${data.evidence.length} evidence sentence(s) retrieved and classified below</div>
+      ${evidenceHtml}
+    </div>`;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>

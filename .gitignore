@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Generated data (large, and regeneratable by running the scripts)
+data/raw/
+data/processed/*.jsonl
+!data/.gitkeep
+
+# Trained models (large binary files - do not commit to plain git)
+models/
+
+# Retrieval / eval outputs (regeneratable by re-running scripts)
+retrieval/*.json
+eval/results_log.csv
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
